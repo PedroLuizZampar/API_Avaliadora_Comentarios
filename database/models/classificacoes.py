@@ -4,6 +4,7 @@ from database.models.comentarios import Comentarios
 
 class Classificacoes(Model):
     comentario = ForeignKeyField(Comentarios, backref='comentarios', on_delete='CASCADE', null=True)
+    avaliacao = CharField()
     classificacao = CharField()
 
     class Meta:
