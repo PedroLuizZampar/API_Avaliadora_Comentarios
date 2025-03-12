@@ -7,22 +7,29 @@ from database.models.classificacoes import Classificacoes
 
 video_route = Blueprint("videos", __name__)
 
-API_URL = "https://api-inference.huggingface.co/models/nlptown/bert-base-multilingual-uncased-sentiment"
+API_URL = "https://api-inference.huggingface.co/models/tabularisai/multilingual-sentiment-analysis"
 headers = {"Authorization": "Bearer "}  # Gere um token na Hugging Face
 
 # TOKEN: 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
 # VIDEO: https://www.youtube.com/watch?v=r9GvvW9Gvcg&list=RDO84LRHxuYL8&index=10&ab_channel=Mission%C3%A1rioShalom-Topic
 
 def analisar_sentimento(texto):
-    response = requests.post(API_URL, headers=headers, json={"inputs": texto})
-    return response.json()
+        response = requests.post(API_URL, headers=headers, json={"inputs": texto})
+        if response.status_code == 200:
+            resultado = response.json()
+            if isinstance(resultado, list) and len(resultado) > 0:
+                return resultado[0]
+            else:
+                return None
+        else:
+            return None
 
 @video_route.route('/cadastra_video', methods=['POST'])
 def cadastrar_video():
     dados = request.form
 
     nome_video = dados['nome_video']
-    qtde_comentarios = dados['qtde_comentarios']
+    qtde_comentarios = int(dados['qtde_comentarios'])
     url = dados['url']
 
     video = Videos.create(
@@ -31,7 +38,7 @@ def cadastrar_video():
         url = url
     )
 
-    lista_comentarios = obter_comentarios(video.id)
+    lista_comentarios = obter_comentarios(video.id, qtde_comentarios)
 
     for comentario in lista_comentarios:
         Comentarios.create(
@@ -42,7 +49,7 @@ def cadastrar_video():
 
     return jsonify(lista_comentarios)
 
-def obter_comentarios(id):    
+def obter_comentarios(id, qtde_comentarios):    
     video = Videos.get_by_id(id)
     url = video.url
     
@@ -53,7 +60,7 @@ def obter_comentarios(id):
         # Coletar apenas os primeiros 10 comentários
         lista_comentarios = []
         for i, comment in enumerate(comments_generator):
-            if i >= 10:
+            if i >= qtde_comentarios:
                 break
             text = comment.get('text', '').replace('\n', ' ').strip()
             if text:
@@ -71,36 +78,32 @@ def classificar_comentarios(id):
     resultado_json = []
 
     for comentario in comentarios:
-        resultado = analisar_sentimento(comentario.comentario)
+        texto = comentario.comentario
 
-        maior_avaliacao = None
-        maior_score = 0
+        resultado = analisar_sentimento(texto)
 
-        if not resultado:
+        if not resultado or not isinstance(resultado, list):
             continue
 
-        for item in resultado[0]:
-            if item.get('score') >= maior_score:
-                maior_avaliacao = item.get('label')
-                maior_score = item.get('score')
+        maior_score = 0
 
-        if maior_avaliacao in ["5 stars", "4 stars"]:
-            classificacao = "Positivo"
-        elif maior_avaliacao in ["2 stars", "1 star"]:
-            classificacao = "Negativo"
-        else:
-            classificacao = "Neutro"
+        # Percorre a lista de classificações e seleciona a de maior score
+        for item in resultado:
+            if item.get('score', 0) > maior_score:
+                maior_score = item.get('score')
+            
+        classificacao = item.get('label')
 
         resultado_json.append({
-            "comentario": comentario.comentario,  # Agora apenas o texto do comentário
-            "avaliação": maior_avaliacao,
-            "classificação": classificacao
+            "comentario": texto,
+            "classificação": classificacao,
+            "pontuação": maior_score
         })
 
         Classificacoes.create(
-            comentario = comentario,
-            avaliacao = maior_avaliacao,
-            classificacao = classificacao
+            comentario=comentario,
+            classificacao=classificacao,
+            confianca=maior_score
         )
 
-    return jsonify(resultado_json)  # Retorna o resultado em formato JSON
+    return jsonify(resultado_json)
